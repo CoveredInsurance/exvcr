@@ -88,6 +88,31 @@ defmodule ExVCR.Adapter.FinchTest do
     end
   end
 
+  test "request with charlist in nested tuple error" do
+    use_cassette "finch_tls_alert_charlist_error", custom: true do
+      {:error, response} = Finch.build(:get, "http://example.com/") |> Finch.request(ExVCRFinch)
+
+      assert response == %Mint.TransportError{
+               reason:
+                 {:tls_alert,
+                  {:handshake_failure,
+                   ~c"TLS client: In state certify received SERVER ALERT: Fatal - Handshake Failure"}}
+             }
+    end
+  end
+
+  test "error reason in cassette is parsed as data and never evaluated" do
+    Application.delete_env(:exvcr, :cassette_code_executed)
+
+    assert_raise ArgumentError, ~r/must be a literal term/, fn ->
+      use_cassette "finch_error_body_code", custom: true do
+        Finch.build(:get, "http://example.com/") |> Finch.request(ExVCRFinch)
+      end
+    end
+
+    refute Application.get_env(:exvcr, :cassette_code_executed)
+  end
+
   test "post method" do
     use_cassette "finch_post" do
       assert_response Finch.build(:post, "http://httpbin.org/post", [], "test") |> Finch.request(ExVCRFinch)

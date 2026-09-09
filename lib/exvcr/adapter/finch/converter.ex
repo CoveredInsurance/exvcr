@@ -35,9 +35,71 @@ if Code.ensure_loaded?(Finch) do
       response
     end
 
+    # The recorded reason is the `Macro.to_string/1` output of an Elixir term.
+    # Cassette contents are untrusted, so rebuild the term from its parsed AST
+    # instead of evaluating it: only literal data shapes are accepted, and any
+    # call, variable, or other executable form is rejected.
     defp string_to_error_reason(reason) do
-      {reason_struct, _} = Code.eval_string(reason)
-      reason_struct
+      case Code.string_to_quoted(reason) do
+        {:ok, quoted} ->
+          quoted_to_term(quoted)
+
+        {:error, _} ->
+          raise ArgumentError,
+                "cassette error reason is not a valid Elixir term: #{inspect(reason)}"
+      end
+    end
+
+    defp quoted_to_term(literal)
+         when is_atom(literal) or is_number(literal) or is_binary(literal),
+         do: literal
+
+    defp quoted_to_term(list) when is_list(list), do: Enum.map(list, &quoted_to_term/1)
+
+    defp quoted_to_term({left, right}), do: {quoted_to_term(left), quoted_to_term(right)}
+
+    defp quoted_to_term({:{}, _, elements}) when is_list(elements),
+      do: elements |> Enum.map(&quoted_to_term/1) |> List.to_tuple()
+
+    defp quoted_to_term({:%{}, _, pairs}) when is_list(pairs),
+      do: Map.new(pairs, &quoted_to_pair/1)
+
+    defp quoted_to_term({:%, _, [module, {:%{}, _, pairs}]}) when is_list(pairs) do
+      case quoted_to_term(module) do
+        name when is_atom(name) -> struct!(name, Enum.map(pairs, &quoted_to_pair/1))
+        _ -> unsupported_error_reason(module)
+      end
+    end
+
+    defp quoted_to_term({:__aliases__, _, parts} = quoted) when is_list(parts) do
+      if Enum.all?(parts, &is_atom/1) do
+        Module.concat(parts)
+      else
+        unsupported_error_reason(quoted)
+      end
+    end
+
+    defp quoted_to_term({:-, _, [number]}) when is_number(number), do: -number
+
+    defp quoted_to_term({:sigil_c, _, [{:<<>>, _, [string]}, []]}) when is_binary(string),
+      do: String.to_charlist(string)
+
+    defp quoted_to_term({:<<>>, _, segments} = quoted) when is_list(segments) do
+      if Enum.all?(segments, &(is_binary(&1) or (is_integer(&1) and &1 in 0..255))) do
+        IO.iodata_to_binary(segments)
+      else
+        unsupported_error_reason(quoted)
+      end
+    end
+
+    defp quoted_to_term(quoted), do: unsupported_error_reason(quoted)
+
+    defp quoted_to_pair({key, value}), do: {quoted_to_term(key), quoted_to_term(value)}
+    defp quoted_to_pair(quoted), do: unsupported_error_reason(quoted)
+
+    defp unsupported_error_reason(quoted) do
+      raise ArgumentError,
+            "cassette error reason must be a literal term, got: #{Macro.to_string(quoted)}"
     end
 
     defp request_to_string([request, finch_module]) do

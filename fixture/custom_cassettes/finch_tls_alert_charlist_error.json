@@ -1,0 +1,19 @@
+[
+  {
+    "request": {
+      "body": "",
+      "headers": [],
+      "method": "get",
+      "options": [],
+      "request_body": "",
+      "url": "http://example.com/"
+    },
+    "response": {
+      "binary": false,
+      "body": "%Mint.TransportError{reason: {:tls_alert, {:handshake_failure, ~c\"TLS client: In state certify received SERVER ALERT: Fatal - Handshake Failure\"}}}",
+      "headers": [],
+      "status_code": null,
+      "type": "error"
+    }
+  }
+]
